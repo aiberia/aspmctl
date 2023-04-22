@@ -9,15 +9,32 @@ const PCI_EXP_LNKCTL: usize = 0x10;
 const PCI_EXP_LNKCTL_ASPM_L0S: u16 = 0x0001;
 const PCI_EXP_LNKCTL_ASPM_L1: u16 = 0x0002;
 
-fn find_pci_capability(config_buffer: &[u8], target_capability_id: u8) -> Option<usize> {
+fn find_pci_capability(
+    config_buffer: &[u8],
+    target_capability_id: u8,
+    target_capability_length: usize,
+) -> Option<std::ops::Range<usize>> {
     let mut capability_pointer = *config_buffer.get(PCI_CAPABILITY_LIST)? as usize;
 
     loop {
         let capability_id = *config_buffer.get(capability_pointer)?;
         let next_capability_pointer = *config_buffer.get(capability_pointer + 1)? as usize;
 
+        if next_capability_pointer != 0 && next_capability_pointer < capability_pointer + 2 {
+            eprintln!("error: next capability pointer invalid");
+            return None;
+        }
+
         if capability_id == target_capability_id {
-            return Some(capability_pointer);
+            if (next_capability_pointer >= capability_pointer
+                && target_capability_length > next_capability_pointer - capability_pointer)
+                || (target_capability_length > config_buffer.len() - capability_pointer)
+            {
+                eprintln!("error: capability length overflow");
+                return None;
+            }
+
+            return Some((capability_pointer)..(capability_pointer + target_capability_length));
         }
 
         if next_capability_pointer > capability_pointer {
@@ -28,25 +45,13 @@ fn find_pci_capability(config_buffer: &[u8], target_capability_id: u8) -> Option
     }
 }
 
-fn find_pci_capability_express(config_buffer: &[u8]) -> Option<std::ops::Range<usize>> {
-    let Some(capability_pointer) = find_pci_capability(&config_buffer, PCI_CAP_ID_EXP) else {
+fn find_pci_exp_link_control(config_buffer: &[u8]) -> Option<std::ops::Range<usize>> {
+    let Some(capability_range) = find_pci_capability(&config_buffer, PCI_CAP_ID_EXP, PCI_CAP_ID_EXP_LEN) else {
         eprintln!("error: unable to find pci express capability structure");
         return None;
     };
 
-    let capability_range = (capability_pointer)..(capability_pointer + PCI_CAP_ID_EXP_LEN);
-
-    if capability_range.end > config_buffer.len() {
-        eprintln!("error: pci capability express structure overflow");
-        return None;
-    }
-
-    Some(capability_range)
-}
-
-fn find_pci_exp_link_control(config_buffer: &[u8]) -> Option<std::ops::Range<usize>> {
-    find_pci_capability_express(config_buffer)
-        .map(|range| (range.start + PCI_EXP_LNKCTL)..(range.start + PCI_EXP_LNKCTL + 2))
+    Some((capability_range.start + PCI_EXP_LNKCTL)..(capability_range.start + PCI_EXP_LNKCTL + 2))
 }
 
 #[derive(Debug)]
