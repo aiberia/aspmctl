@@ -128,7 +128,11 @@ fn main() -> ExitCode {
 
     let mut config_buffer = Vec::<u8>::new();
 
-    if let Err(err) = config_file.read_to_end(&mut config_buffer) {
+    if let Err(err) = config_file
+        .by_ref()
+        .take(256)
+        .read_to_end(&mut config_buffer)
+    {
         eprintln!("read: {}: {}", args.path, err);
         return ExitCode::from(1);
     }
